@@ -51,9 +51,9 @@ All text above, and the splash screen must be included in any redistribution
 
 class Adafruit_PCD8544 : public Adafruit_GFX {
  public:
-  Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC, int8_t CS, int8_t RST);
-  Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC, int8_t RST);
-
+  Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC, int8_t CS, int8_t RST, uint8_t openDrain=0);
+  Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC, int8_t RST, uint8_t openDrain=0);
+  
   void begin(uint8_t contrast = 40);
   
   void command(uint8_t c);
@@ -68,9 +68,10 @@ class Adafruit_PCD8544 : public Adafruit_GFX {
 
  private:
   int8_t _din, _sclk, _dc, _rst, _cs;
-  volatile uint8_t *mosiport, *clkport, *csport, *dcport;
-  uint8_t mosipinmask, clkpinmask, cspinmask, dcpinmask;
+  uint8_t _openDrain;
+  volatile uint8_t *mosiport, *clkport;
+  uint8_t mosipinmask, clkpinmask;
 
-  void slowSPIwrite(uint8_t c);
   void fastSPIwrite(uint8_t c);
+  void slowSPIwrite(uint8_t c) {fastSPIwrite(c);}
 };

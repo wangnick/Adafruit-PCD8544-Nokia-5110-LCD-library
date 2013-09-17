@@ -87,23 +87,24 @@ static void updateBoundingBox(uint8_t xmin, uint8_t ymin, uint8_t xmax, uint8_t 
 }
 
 Adafruit_PCD8544::Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC,
-    int8_t CS, int8_t RST) : Adafruit_GFX(LCDWIDTH, LCDHEIGHT) {
+    int8_t CS, int8_t RST, uint8_t openDrain) : Adafruit_GFX(LCDWIDTH, LCDHEIGHT) {
   _din = DIN;
   _sclk = SCLK;
   _dc = DC;
   _rst = RST;
   _cs = CS;
+  _openDrain = openDrain;
 }
 
 Adafruit_PCD8544::Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC,
-    int8_t RST) : Adafruit_GFX(LCDWIDTH, LCDHEIGHT) {
+    int8_t RST, uint8_t openDrain) : Adafruit_GFX(LCDWIDTH, LCDHEIGHT) {
   _din = DIN;
   _sclk = SCLK;
   _dc = DC;
   _rst = RST;
   _cs = -1;
+  _openDrain = openDrain;
 }
-
 
 // the most basic function, set a single pixel
 void Adafruit_PCD8544::drawPixel(int16_t x, int16_t y, uint16_t color) {
@@ -128,33 +129,31 @@ uint8_t Adafruit_PCD8544::getPixel(int8_t x, int8_t y) {
   return (pcd8544_buffer[x+ (y/8)*LCDWIDTH] >> (y%8)) & 0x1;  
 }
 
+#define setPin(pin,val) if (_openDrain) pinMode(pin,val?INPUT:OUTPUT); else digitalWrite(pin,val);
 
 void Adafruit_PCD8544::begin(uint8_t contrast) {
   // set pin directions
-  pinMode(_din, OUTPUT);
-  pinMode(_sclk, OUTPUT);
-  pinMode(_dc, OUTPUT);
-  if (_rst > 0)
-    pinMode(_rst, OUTPUT);
-  if (_cs > 0)
-    pinMode(_cs, OUTPUT);
-
+  const uint8_t mode = _openDrain? INPUT: OUTPUT;
+  pinMode(_din, mode);
+  pinMode(_sclk, mode);
+  pinMode(_dc, mode);
+  if (_rst > -1)
+    pinMode(_rst, mode);
+  if (_cs > -1)
+    pinMode(_cs, mode);
+  
   // toggle RST low to reset
-  if (_rst > 0) {
-    digitalWrite(_rst, LOW);
+  if (_rst > -1) {
+    setPin(_rst, LOW);
     _delay_ms(500);
-    digitalWrite(_rst, HIGH);
+    setPin(_rst, HIGH);
   }
 
-  clkport     = portOutputRegister(digitalPinToPort(_sclk));
+  clkport     = _openDrain?portModeRegister(digitalPinToPort(_sclk)):portOutputRegister(digitalPinToPort(_sclk));
   clkpinmask  = digitalPinToBitMask(_sclk);
-  mosiport    = portOutputRegister(digitalPinToPort(_din));
+  mosiport    = _openDrain?portModeRegister(digitalPinToPort(_din)):portOutputRegister(digitalPinToPort(_din));
   mosipinmask = digitalPinToBitMask(_din);
-  csport    = portOutputRegister(digitalPinToPort(_cs));
-  cspinmask = digitalPinToBitMask(_cs);
-  dcport    = portOutputRegister(digitalPinToPort(_dc));
-  dcpinmask = digitalPinToBitMask(_dc);
-
+ 
   // get into the EXTENDED mode!
   command(PCD8544_FUNCTIONSET | PCD8544_EXTENDEDINSTRUCTION );
 
@@ -186,37 +185,40 @@ void Adafruit_PCD8544::begin(uint8_t contrast) {
   display();
 }
 
-
 inline void Adafruit_PCD8544::fastSPIwrite(uint8_t d) {
-  
-  for(uint8_t bit = 0x80; bit; bit >>= 1) {
-    *clkport &= ~clkpinmask;
-    if(d & bit) *mosiport |=  mosipinmask;
-    else        *mosiport &= ~mosipinmask;
-    *clkport |=  clkpinmask;
+  if (_openDrain) { // Condition outside loop for performance
+    for (uint8_t bit = 0x80; bit; bit >>= 1) {
+      *clkport |= clkpinmask; // CLK low -> OUTPUT -> Set bit in DDR register
+      if(d & bit) *mosiport &= ~mosipinmask; // MOSI high-> INPUT -> Clear bit in DDR register
+      else        *mosiport |=  mosipinmask; // MOSI low -> OUTPUT -> Set bit in DDR register
+      *clkport &= ~clkpinmask; // CLK high -> INPUT -> Clear bit in DDR register
+    }
+  } else {
+    for (uint8_t bit = 0x80; bit; bit >>= 1) {
+      *clkport &= ~clkpinmask;
+      if(d & bit) *mosiport |=  mosipinmask;
+      else        *mosiport &= ~mosipinmask;
+      *clkport |=  clkpinmask;
+    }
   }
 }
 
-inline void Adafruit_PCD8544::slowSPIwrite(uint8_t c) {
-  shiftOut(_din, _sclk, MSBFIRST, c);
-}
-
 void Adafruit_PCD8544::command(uint8_t c) {
-  digitalWrite(_dc, LOW);
-  if (_cs > 0)
-    digitalWrite(_cs, LOW);
+  setPin(_dc, LOW);
+  if (_cs > -1)
+    setPin(_cs, LOW);
   fastSPIwrite(c);
-  if (_cs > 0)
-    digitalWrite(_cs, HIGH);
+  if (_cs > -1)
+    setPin(_cs, HIGH);
 }
 
 void Adafruit_PCD8544::data(uint8_t c) {
-  digitalWrite(_dc, HIGH);
-  if (_cs > 0)
-    digitalWrite(_cs, LOW);
+  setPin(_dc, HIGH);
+  if (_cs > -1)
+    setPin(_cs, LOW);
   fastSPIwrite(c);
-  if (_cs > 0)
-    digitalWrite(_cs, HIGH);
+  if (_cs > -1)
+    setPin(_cs, HIGH);
 }
 
 void Adafruit_PCD8544::setContrast(uint8_t val) {
@@ -242,7 +244,7 @@ void Adafruit_PCD8544::display(void) {
     }
     if (yUpdateMax < p*8) {
       break;
-    }d
+    }
 #endif
 
     command(PCD8544_SETYADDR | p);
@@ -259,16 +261,16 @@ void Adafruit_PCD8544::display(void) {
 
     command(PCD8544_SETXADDR | col);
 
-    digitalWrite(_dc, HIGH);
-    if (_cs > 0)
-      digitalWrite(_cs, LOW);
+    setPin(_dc, HIGH);
+    if (_cs > -1)
+      setPin(_cs, LOW);
     for(; col <= maxcol; col++) {
       //uart_putw_dec(col);
       //uart_putchar(' ');
       fastSPIwrite(pcd8544_buffer[(LCDWIDTH*p)+col]);
     }
-    if (_cs > 0)
-      digitalWrite(_cs, HIGH);
+    if (_cs > -1)
+      setPin(_cs, HIGH);
 
   }
 
